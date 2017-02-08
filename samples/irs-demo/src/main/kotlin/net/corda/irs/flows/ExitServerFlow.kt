@@ -7,6 +7,7 @@ import net.corda.core.flows.FlowLogic
 import net.corda.core.node.CordaPluginRegistry
 import net.corda.core.node.NodeInfo
 import net.corda.core.node.PluginServiceHub
+import net.corda.core.utilities.unwrap
 import net.corda.testing.node.MockNetworkMapCache
 import java.util.concurrent.TimeUnit
 import java.util.function.Function
@@ -32,7 +33,7 @@ object ExitServerFlow {
     }
 
 
-    private class ExitServerHandler(val otherParty: Party.Full) : FlowLogic<Unit>() {
+    private class ExitServerHandler(val otherParty: Party) : FlowLogic<Unit>() {
         override fun call() {
             // Just to validate we got the message
             if (enabled) {

@@ -7,11 +7,13 @@ import co.paralleluniverse.strands.Strand
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import net.corda.core.crypto.Party
+import net.corda.core.crypto.SecureHash
 import net.corda.core.flows.FlowException
 import net.corda.core.flows.FlowLogic
 import net.corda.core.flows.FlowStateMachine
 import net.corda.core.flows.StateMachineRunId
 import net.corda.core.random63BitValue
+import net.corda.core.transactions.SignedTransaction
 import net.corda.core.utilities.UntrustworthyData
 import net.corda.core.utilities.trace
 import net.corda.node.services.api.ServiceHubInternal
@@ -72,7 +74,9 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
         }
     }
 
-    internal val openSessions = HashMap<Pair<FlowLogic<*>, Party.Full>, FlowSession>()
+    // This state IS serialised, as we need it to know what the fiber is waiting for.
+    internal val openSessions = HashMap<Pair<FlowLogic<*>, Party>, FlowSession>()
+    internal var waitingForLedgerCommitOf: SecureHash? = null
 
     init {
         logic.stateMachine = this
@@ -127,7 +131,7 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
 
     @Suspendable
     override fun <T : Any> sendAndReceive(receiveType: Class<T>,
-                                          otherParty: Party.Full,
+                                          otherParty: Party,
                                           payload: Any,
                                           sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
         val session = getConfirmedSession(otherParty, sessionFlow)
@@ -141,14 +145,14 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
 
     @Suspendable
     override fun <T : Any> receive(receiveType: Class<T>,
-                                   otherParty: Party.Full,
+                                   otherParty: Party,
                                    sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
         val session = getConfirmedSession(otherParty, sessionFlow) ?: startNewSession(otherParty, sessionFlow, null, waitForConfirmation = true)
         return receiveInternal<SessionData>(session).checkPayloadIs(receiveType)
     }
 
     @Suspendable
-    override fun send(otherParty: Party.Full, payload: Any, sessionFlow: FlowLogic<*>) {
+    override fun send(otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>) {
         val session = getConfirmedSession(otherParty, sessionFlow)
         if (session == null) {
             // Don't send the payload again if it was already piggy-backed on a session init
@@ -170,6 +174,16 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
             sessionInitResponse as SessionReject
             throw FlowException("Party ${state.sendToParty} rejected session request: ${sessionInitResponse.errorMessage}")
         }
+    }
+
+    @Suspendable
+    override fun waitForLedgerCommit(hash: SecureHash, sessionFlow: FlowLogic<*>): SignedTransaction {
+        waitingForLedgerCommitOf = hash
+        logger.info("Waiting for transaction $hash to commit")
+        suspend(WaitForLedgerCommit(hash, sessionFlow.stateMachine as FlowStateMachineImpl<*>))
+        logger.info("Transaction $hash has committed to the ledger, resuming")
+        val stx = serviceHub.storageService.validatedTransactions.getTransaction(hash)
+        return stx ?: throw IllegalStateException("We were resumed after waiting for $hash but it wasn't found in our local storage")
     }
 
     private fun createSessionData(session: FlowSession, payload: Any): SessionData {
@@ -197,7 +211,7 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
     }
 
     @Suspendable
-    private fun getConfirmedSession(otherParty: Party.Full, sessionFlow: FlowLogic<*>): FlowSession? {
+    private fun getConfirmedSession(otherParty: Party, sessionFlow: FlowLogic<*>): FlowSession? {
         return openSessions[Pair(sessionFlow, otherParty)]?.apply {
             if (state is FlowSessionState.Initiating) {
                 // Session still initiating, try to retrieve the init response.
@@ -213,7 +227,7 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
      * multiple public keys, but we **don't support multiple nodes advertising the same legal identity**.
      */
     @Suspendable
-    private fun startNewSession(otherParty: Party.Full, sessionFlow: FlowLogic<*>, firstPayload: Any?, waitForConfirmation: Boolean): FlowSession {
+    private fun startNewSession(otherParty: Party, sessionFlow: FlowLogic<*>, firstPayload: Any?, waitForConfirmation: Boolean): FlowSession {
         logger.trace { "Initiating a new session with $otherParty" }
         val session = FlowSession(sessionFlow, random63BitValue(), null, FlowSessionState.Initiating(otherParty))
         openSessions[Pair(sessionFlow, otherParty)] = session
@@ -266,10 +280,12 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
 
     @Suspendable
     private fun suspend(ioRequest: FlowIORequest) {
-        // we have to pass the Thread local Transaction across via a transient field as the Fiber Park swaps them out.
+        // We have to pass the thread local database transaction across via a transient field as the fiber park
+        // swaps them out.
         txTrampoline = TransactionManager.currentOrNull()
         StrandLocalTransactionManager.setThreadLocalTx(null)
-        ioRequest.session.waitingForResponse = (ioRequest is ReceiveRequest<*>)
+        if (ioRequest is SessionedFlowIORequest)
+            ioRequest.session.waitingForResponse = (ioRequest is ReceiveRequest<*>)
 
         var exceptionDuringSuspend: Throwable? = null
         parkAndSerialize { fiber, serializer ->

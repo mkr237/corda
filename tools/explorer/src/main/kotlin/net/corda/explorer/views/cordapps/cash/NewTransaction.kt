@@ -21,7 +21,6 @@ import net.corda.core.getOrThrow
 import net.corda.core.messaging.startFlow
 import net.corda.core.node.NodeInfo
 import net.corda.core.serialization.OpaqueBytes
-import net.corda.core.toFuture
 import net.corda.core.transactions.SignedTransaction
 import net.corda.explorer.model.CashTransaction
 import net.corda.explorer.model.IssuerModel
@@ -48,7 +47,7 @@ class NewTransaction : Fragment() {
     private val partyBLabel by fxid<Label>()
     private val issuerLabel by fxid<Label>()
     private val issuerTextField by fxid<TextField>()
-    private val issuerChoiceBox by fxid<ChoiceBox<Party.Full>>()
+    private val issuerChoiceBox by fxid<ChoiceBox<Party>>()
     private val issueRefLabel by fxid<Label>()
     private val issueRefTextField by fxid<TextField>()
     private val currencyLabel by fxid<Label>()
@@ -101,7 +100,7 @@ class NewTransaction : Fragment() {
                     rpcProxy.value!!.startFlow(::CashFlow, it)
                 }
                 val response = try {
-                    handle?.returnValue?.toFuture()?.getOrThrow()
+                    handle?.returnValue?.getOrThrow()
                 } catch (e: FlowException) {
                     e
                 }

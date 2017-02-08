@@ -9,6 +9,7 @@ import net.corda.core.node.PluginServiceHub
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.utilities.ProgressTracker
+import net.corda.core.utilities.unwrap
 import java.util.*
 
 /**
@@ -19,14 +20,14 @@ import java.util.*
  *  useful for creation of fake assets.
  */
 object IssuerFlow {
-    data class IssuanceRequestState(val amount: Amount<Currency>, val issueToParty: Party.Full, val issuerPartyRef: OpaqueBytes)
+    data class IssuanceRequestState(val amount: Amount<Currency>, val issueToParty: Party, val issuerPartyRef: OpaqueBytes)
 
     /**
      * IssuanceRequester should be used by a client to ask a remote node to issue some [FungibleAsset] with the given details.
      * Returns the transaction created by the Issuer to move the cash to the Requester.
      */
-    class IssuanceRequester(val amount: Amount<Currency>, val issueToParty: Party.Full, val issueToPartyRef: OpaqueBytes,
-                            val issuerBankParty: Party.Full): FlowLogic<SignedTransaction>() {
+    class IssuanceRequester(val amount: Amount<Currency>, val issueToParty: Party, val issueToPartyRef: OpaqueBytes,
+                            val issuerBankParty: Party): FlowLogic<SignedTransaction>() {
         @Suspendable
         @Throws(CashException::class)
         override fun call(): SignedTransaction {
@@ -39,7 +40,7 @@ object IssuerFlow {
      * Issuer refers to a Node acting as a Bank Issuer of [FungibleAsset], and processes requests from a [IssuanceRequester] client.
      * Returns the generated transaction representing the transfer of the [Issued] [FungibleAsset] to the issue requester.
      */
-    class Issuer(val otherParty: Party.Full): FlowLogic<SignedTransaction>() {
+    class Issuer(val otherParty: Party): FlowLogic<SignedTransaction>() {
         companion object {
             object AWAITING_REQUEST : ProgressTracker.Step("Awaiting issuance request")
             object ISSUING : ProgressTracker.Step("Self issuing asset")
@@ -71,7 +72,7 @@ object IssuerFlow {
         //       state references (thus causing Notarisation double spend exceptions).
         @Suspendable
         private fun issueCashTo(amount: Amount<Currency>,
-                                issueTo: Party.Full,
+                                issueTo: Party,
                                 issuerPartyRef: OpaqueBytes): SignedTransaction {
             // TODO: pass notary in as request parameter
             val notaryParty = serviceHub.networkMapCache.notaryNodes[0].notaryIdentity

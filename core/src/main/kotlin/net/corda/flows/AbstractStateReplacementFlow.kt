@@ -15,6 +15,7 @@ import net.corda.core.transactions.SignedTransaction
 import net.corda.core.transactions.WireTransaction
 import net.corda.core.utilities.ProgressTracker
 import net.corda.core.utilities.UntrustworthyData
+import net.corda.core.utilities.unwrap
 import net.corda.flows.AbstractStateReplacementFlow.Acceptor
 import net.corda.flows.AbstractStateReplacementFlow.Instigator
 
@@ -84,7 +85,7 @@ abstract class AbstractStateReplacementFlow {
         }
 
         @Suspendable
-        private fun getParticipantSignature(party: Party.Full, stx: SignedTransaction): DigitalSignature.WithKey {
+        private fun getParticipantSignature(party: Party, stx: SignedTransaction): DigitalSignature.WithKey {
             val proposal = Proposal(originalState.ref, modification, stx)
             val response = sendAndReceive<DigitalSignature.WithKey>(party, proposal)
             return response.unwrap {
@@ -105,7 +106,7 @@ abstract class AbstractStateReplacementFlow {
         }
     }
 
-    abstract class Acceptor<in T>(val otherSide: Party.Full,
+    abstract class Acceptor<in T>(val otherSide: Party,
                                   override val progressTracker: ProgressTracker = tracker()) : FlowLogic<Unit>() {
         companion object {
             object VERIFYING : ProgressTracker.Step("Verifying state replacement proposal")

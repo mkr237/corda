@@ -16,6 +16,7 @@ import net.corda.core.transactions.WireTransaction
 import net.corda.core.utilities.ProgressTracker
 import net.corda.core.utilities.UntrustworthyData
 import net.corda.core.utilities.trace
+import net.corda.core.utilities.unwrap
 import java.security.KeyPair
 
 /**
@@ -71,10 +72,10 @@ object TwoPartyDealFlow {
 
         abstract val payload: Any
         abstract val notaryNode: NodeInfo
-        abstract val otherParty: Party.Full
+        abstract val otherParty: Party
         abstract val myKeyPair: KeyPair
 
-        override fun getCounterpartyMarker(party: Party.Full): Class<*> {
+        override fun getCounterpartyMarker(party: Party): Class<*> {
             return if (serviceHub.networkMapCache.regulatorNodes.any { it.legalIdentity == party }) {
                 MarkerForBogusRegulatorFlow::class.java
             } else {
@@ -202,7 +203,7 @@ object TwoPartyDealFlow {
             fun tracker() = ProgressTracker(RECEIVING, VERIFYING, SIGNING, SWAPPING_SIGNATURES, RECORDING)
         }
 
-        abstract val otherParty: Party.Full
+        abstract val otherParty: Party
 
         @Suspendable
         override fun call(): SignedTransaction {
@@ -263,13 +264,13 @@ object TwoPartyDealFlow {
     }
 
 
-    data class AutoOffer(val notary: Party.Full, val dealBeingOffered: DealState)
+    data class AutoOffer(val notary: Party, val dealBeingOffered: DealState)
 
 
     /**
      * One side of the flow for inserting a pre-agreed deal.
      */
-    open class Instigator(override val otherParty: Party.Full,
+    open class Instigator(override val otherParty: Party,
                           override val payload: AutoOffer,
                           override val myKeyPair: KeyPair,
                           override val progressTracker: ProgressTracker = Primary.tracker()) : Primary() {
@@ -281,7 +282,7 @@ object TwoPartyDealFlow {
     /**
      * One side of the flow for inserting a pre-agreed deal.
      */
-    open class Acceptor(override val otherParty: Party.Full,
+    open class Acceptor(override val otherParty: Party,
                         override val progressTracker: ProgressTracker = Secondary.tracker()) : Secondary<AutoOffer>() {
 
         override fun validateHandshake(handshake: Handshake<AutoOffer>): Handshake<AutoOffer> {

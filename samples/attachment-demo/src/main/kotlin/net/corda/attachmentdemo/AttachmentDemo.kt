@@ -6,6 +6,7 @@ import net.corda.core.contracts.TransactionType
 import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
 import net.corda.core.div
+import net.corda.core.getOrThrow
 import net.corda.core.messaging.CordaRPCOps
 import net.corda.core.messaging.startFlow
 import net.corda.core.utilities.Emoji
@@ -41,14 +42,14 @@ fun main(args: Array<String>) {
         Role.SENDER -> {
             val host = HostAndPort.fromString("localhost:10004")
             println("Connecting to sender node ($host)")
-            CordaRPCClient(host, sslConfigFor("nodea", options.valueOf(certsPath))).use("demo", "demo") {
+            CordaRPCClient(host, sslConfigFor("BankA", options.valueOf(certsPath))).use("demo", "demo") {
                 sender(this)
             }
         }
         Role.RECIPIENT -> {
             val host = HostAndPort.fromString("localhost:10006")
             println("Connecting to the recipient node ($host)")
-            CordaRPCClient(host, sslConfigFor("nodeb", options.valueOf(certsPath))).use("demo", "demo") {
+            CordaRPCClient(host, sslConfigFor("BankB", options.valueOf(certsPath))).use("demo", "demo") {
                 recipient(this)
             }
         }
@@ -59,7 +60,7 @@ val PROSPECTUS_HASH = SecureHash.parse("decd098666b9657314870e192ced0c3519c2c9d3
 
 fun sender(rpc: CordaRPCOps) {
     // Get the identity key of the other side (the recipient).
-    val otherSide: Party.Full = rpc.partyFromName("Bank B")!!
+    val otherSide: Party = rpc.partyFromName("Bank B")!!
 
     // Make sure we have the file in storage
     // TODO: We should have our own demo file, not share the trader demo file
@@ -83,9 +84,9 @@ fun sender(rpc: CordaRPCOps) {
     // Send the transaction to the other recipient
     val stx = ptx.toSignedTransaction()
     println("Sending ${stx.id}")
-    val protocolHandle = rpc.startFlow(::FinalityFlow, stx, setOf(otherSide))
-    protocolHandle.progress.subscribe(::println)
-    protocolHandle.returnValue.toBlocking().first()
+    val flowHandle = rpc.startFlow(::FinalityFlow, stx, setOf(otherSide))
+    flowHandle.progress.subscribe(::println)
+    flowHandle.returnValue.getOrThrow()
 }
 
 fun recipient(rpc: CordaRPCOps) {

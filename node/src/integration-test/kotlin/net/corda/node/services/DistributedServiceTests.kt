@@ -11,7 +11,6 @@ import net.corda.core.messaging.StateMachineUpdate
 import net.corda.core.messaging.startFlow
 import net.corda.core.node.NodeInfo
 import net.corda.core.serialization.OpaqueBytes
-import net.corda.core.toFuture
 import net.corda.flows.CashCommand
 import net.corda.flows.CashFlow
 import net.corda.node.driver.DriverBasedTest
@@ -30,7 +29,7 @@ class DistributedServiceTests : DriverBasedTest() {
     lateinit var alice: NodeHandle
     lateinit var notaries: List<NodeHandle>
     lateinit var aliceProxy: CordaRPCOps
-    lateinit var raftNotaryIdentity: Party.Full
+    lateinit var raftNotaryIdentity: Party
     lateinit var notaryStateMachines: Observable<Pair<NodeInfo, StateMachineUpdate>>
 
     override fun setup() = driver {
@@ -80,7 +79,7 @@ class DistributedServiceTests : DriverBasedTest() {
         }
 
         // The state machines added in the notaries should map one-to-one to notarisation requests
-        val notarisationsPerNotary = HashMap<Party.Full, Int>()
+        val notarisationsPerNotary = HashMap<Party, Int>()
         notaryStateMachines.expectEvents(isStrict = false) {
             replicate<Pair<NodeInfo, StateMachineUpdate>>(50) {
                 expect(match = { it.second is StateMachineUpdate.Added }) {
@@ -119,7 +118,7 @@ class DistributedServiceTests : DriverBasedTest() {
             paySelf(5.POUNDS)
         }
 
-        val notarisationsPerNotary = HashMap<Party.Full, Int>()
+        val notarisationsPerNotary = HashMap<Party, Int>()
         notaryStateMachines.expectEvents(isStrict = false) {
             replicate<Pair<NodeInfo, StateMachineUpdate>>(30) {
                 expect(match = { it.second is StateMachineUpdate.Added }) {
@@ -138,13 +137,13 @@ class DistributedServiceTests : DriverBasedTest() {
         val issueHandle = aliceProxy.startFlow(
                 ::CashFlow,
                 CashCommand.IssueCash(amount, OpaqueBytes.of(0), alice.nodeInfo.legalIdentity, raftNotaryIdentity))
-        issueHandle.returnValue.toFuture().getOrThrow()
+        issueHandle.returnValue.getOrThrow()
     }
 
     private fun paySelf(amount: Amount<Currency>) {
         val payHandle = aliceProxy.startFlow(
                 ::CashFlow,
                 CashCommand.PayCash(amount.issuedBy(alice.nodeInfo.legalIdentity.ref(0)), alice.nodeInfo.legalIdentity))
-        payHandle.returnValue.toFuture().getOrThrow()
+        payHandle.returnValue.getOrThrow()
     }
 }

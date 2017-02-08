@@ -93,7 +93,7 @@ class CashFlow(val command: CashCommand, override val progressTracker: ProgressT
 
         // TODO: Is it safe to drop participants we don't know how to contact? Does not knowing how to contact them
         //       count as a reason to fail?
-        val participants: Set<Party.Full> = inputStates
+        val participants: Set<Party> = inputStates
                 .filterIsInstance<Cash.State>()
                 .map { serviceHub.identityService.partyFromKey(it.owner) }
                 .filterNotNull()
@@ -106,7 +106,7 @@ class CashFlow(val command: CashCommand, override val progressTracker: ProgressT
     }
 
     @Suspendable
-    private fun finaliseTx(participants: Set<Party.Full>, tx: SignedTransaction, message: String) {
+    private fun finaliseTx(participants: Set<Party>, tx: SignedTransaction, message: String) {
         try {
             subFlow(FinalityFlow(tx, participants))
         } catch (e: NotaryException) {
@@ -123,9 +123,8 @@ class CashFlow(val command: CashCommand, override val progressTracker: ProgressT
         Cash().generateIssue(builder, req.amount.issuedBy(issuer), req.recipient.owningKey, req.notary)
         val myKey = serviceHub.legalIdentityKey
         builder.signWith(myKey)
-        val tx = builder.toSignedTransaction(checkSufficientSignatures = true)
-        // Issuance transactions do not need to be notarised, so we can skip directly to broadcasting it
-        subFlow(BroadcastTransactionFlow(tx, setOf(req.recipient)))
+        val tx = builder.toSignedTransaction()
+        subFlow(FinalityFlow(tx))
         return tx
     }
 }
@@ -145,8 +144,8 @@ sealed class CashCommand {
      */
     class IssueCash(val amount: Amount<Currency>,
                     val issueRef: OpaqueBytes,
-                    val recipient: Party.Full,
-                    val notary: Party.Full) : CashCommand()
+                    val recipient: Party,
+                    val notary: Party) : CashCommand()
 
     /**
      * Pay cash to someone else.
@@ -154,7 +153,7 @@ sealed class CashCommand {
      * @param amount the amount of currency to issue on to the ledger.
      * @param recipient the party to issue the cash to.
      */
-    class PayCash(val amount: Amount<Issued<Currency>>, val recipient: Party.Full) : CashCommand()
+    class PayCash(val amount: Amount<Issued<Currency>>, val recipient: Party) : CashCommand()
 
     /**
      * Exit cash from the ledger.

@@ -5,8 +5,10 @@ import co.paralleluniverse.fibers.Suspendable
 import co.paralleluniverse.strands.Strand.UncaughtExceptionHandler
 import com.google.common.util.concurrent.ListenableFuture
 import net.corda.core.contracts.DOLLARS
+import net.corda.core.contracts.DummyState
 import net.corda.core.contracts.issuedBy
 import net.corda.core.crypto.Party
+import net.corda.core.crypto.SecureHash
 import net.corda.core.crypto.generateKeyPair
 import net.corda.core.flows.FlowException
 import net.corda.core.flows.FlowLogic
@@ -19,8 +21,12 @@ import net.corda.core.random63BitValue
 import net.corda.core.rootCause
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.serialization.deserialize
+import net.corda.core.utilities.unwrap
+import net.corda.core.transactions.SignedTransaction
+import net.corda.core.transactions.TransactionBuilder
 import net.corda.flows.CashCommand
 import net.corda.flows.CashFlow
+import net.corda.flows.FinalityFlow
 import net.corda.flows.NotaryFlow
 import net.corda.node.services.persistence.checkpoints
 import net.corda.node.services.transactions.ValidatingNotaryService
@@ -390,9 +396,8 @@ class StateMachineManagerTests {
                 node2 sent sessionConfirm to node1,
                 node2 sent sessionEnd(errorFlow.exceptionThrown) to node1
         )
-        // TODO see StateMachineManager.endAllFiberSessions
-//        // Make sure the original stack trace isn't sent down the wire
-//        assertThat((sessionTransfers.last().message as SessionEnd).errorResponse!!.stackTrace).isEmpty()
+        // Make sure the original stack trace isn't sent down the wire
+        assertThat((sessionTransfers.last().message as SessionEnd).errorResponse!!.stackTrace).isEmpty()
     }
 
     @Test
@@ -409,7 +414,7 @@ class StateMachineManagerTests {
                 .withMessage("Chain")
     }
 
-    private class SendAndReceiveFlow(val otherParty: Party.Full, val payload: Any) : FlowLogic<Unit>() {
+    private class SendAndReceiveFlow(val otherParty: Party, val payload: Any) : FlowLogic<Unit>() {
         @Suspendable
         override fun call() {
             sendAndReceive<Any>(otherParty, payload)
@@ -449,7 +454,7 @@ class StateMachineManagerTests {
         )
     }
 
-    private class ConditionalExceptionFlow(val otherParty: Party.Full, val sendPayload: Any) : FlowLogic<Unit>() {
+    private class ConditionalExceptionFlow(val otherParty: Party, val sendPayload: Any) : FlowLogic<Unit>() {
         @Suspendable
         override fun call() {
             val throwException = receive<Boolean>(otherParty).unwrap { it }
@@ -462,12 +467,12 @@ class StateMachineManagerTests {
 
     @Test
     fun `retry subFlow due to receiving FlowException`() {
-        class AskForExceptionFlow(val otherParty: Party.Full, val throwException: Boolean) : FlowLogic<String>() {
+        class AskForExceptionFlow(val otherParty: Party, val throwException: Boolean) : FlowLogic<String>() {
             @Suspendable
             override fun call(): String = sendAndReceive<String>(otherParty, throwException).unwrap { it }
         }
 
-        class RetryOnExceptionFlow(val otherParty: Party.Full) : FlowLogic<String>() {
+        class RetryOnExceptionFlow(val otherParty: Party) : FlowLogic<String>() {
             @Suspendable
             override fun call(): String {
                 return try {
@@ -484,9 +489,26 @@ class StateMachineManagerTests {
         assertThat(resultFuture.getOrThrow()).isEqualTo("Hello")
     }
 
-    private inline fun <reified P : FlowLogic<*>> MockNode.restartAndGetRestoredFlow(
-            networkMapNode: MockNode? = null): P {
-        disableDBCloseOnStop() //Handover DB to new node copy
+    @Test
+    fun `wait for transaction`() {
+        val ptx = TransactionBuilder(notary = notary1.info.notaryIdentity)
+        ptx.addOutputState(DummyState())
+        ptx.signWith(node1.services.legalIdentityKey)
+        val stx = ptx.toSignedTransaction()
+
+        val future1 = node2.services.startFlow(WaitingFlows.Waiter(stx.id)).resultFuture
+        val future2 = node1.services.startFlow(WaitingFlows.Committer(stx, node2.info.legalIdentity)).resultFuture
+        net.runNetwork()
+        future1.getOrThrow()
+        future2.getOrThrow()
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //region Helpers
+
+    private inline fun <reified P : FlowLogic<*>> MockNode.restartAndGetRestoredFlow(networkMapNode: MockNode? = null): P {
+        disableDBCloseOnStop() // Handover DB to new node copy
         stop()
         val newNode = mockNet.createNode(networkMapNode?.info?.address, id, advertisedServices = *advertisedServices.toTypedArray())
         newNode.acceptableLiveFiberCountOnStop = 1
@@ -556,7 +578,7 @@ class StateMachineManagerTests {
     }
 
 
-    private class SendFlow(val payload: Any, vararg val otherParties: Party.Full) : FlowLogic<Unit>() {
+    private class SendFlow(val payload: Any, vararg val otherParties: Party) : FlowLogic<Unit>() {
         init {
             require(otherParties.isNotEmpty())
         }
@@ -566,7 +588,7 @@ class StateMachineManagerTests {
     }
 
 
-    private class ReceiveFlow(vararg val otherParties: Party.Full) : FlowLogic<Unit>() {
+    private class ReceiveFlow(vararg val otherParties: Party) : FlowLogic<Unit>() {
         private var nonTerminating: Boolean = false
 
         init {
@@ -589,7 +611,7 @@ class StateMachineManagerTests {
         }
     }
 
-    private class PingPongFlow(val otherParty: Party.Full, val payload: Long) : FlowLogic<Unit>() {
+    private class PingPongFlow(val otherParty: Party, val payload: Long) : FlowLogic<Unit>() {
         @Transient var receivedPayload: Long? = null
         @Transient var receivedPayload2: Long? = null
 
@@ -612,4 +634,22 @@ class StateMachineManagerTests {
         override fun equals(other: Any?): Boolean = other is MyFlowException && other.message == this.message
         override fun hashCode(): Int = message?.hashCode() ?: 31
     }
+
+    private object WaitingFlows {
+        class Waiter(private val hash: SecureHash) : FlowLogic<Unit>() {
+            @Suspendable
+            override fun call() {
+                waitForLedgerCommit(hash)
+            }
+        }
+
+        class Committer(private val stx: SignedTransaction, private val otherParty: Party) : FlowLogic<Unit>() {
+            @Suspendable
+            override fun call() {
+                subFlow(FinalityFlow(stx, setOf(otherParty)))
+            }
+        }
+    }
+
+    //endregion Helpers
 }

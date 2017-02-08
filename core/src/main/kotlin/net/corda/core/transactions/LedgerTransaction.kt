@@ -26,7 +26,7 @@ class LedgerTransaction(
         val attachments: List<Attachment>,
         /** The hash of the original serialised WireTransaction. */
         override val id: SecureHash,
-        notary: Party.Full?,
+        notary: Party?,
         signers: List<CompositeKey>,
         timestamp: Timestamp?,
         type: TransactionType
@@ -54,6 +54,7 @@ class LedgerTransaction(
      *
      * @throws TransactionVerificationException if anything goes wrong.
      */
+    @Throws(TransactionVerificationException::class)
     fun verify() = type.verify(this)
 
     // TODO: When we upgrade to Kotlin 1.1 we can make this a data class again and have the compiler generate these.

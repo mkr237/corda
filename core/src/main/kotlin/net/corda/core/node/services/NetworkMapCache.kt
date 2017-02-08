@@ -60,7 +60,7 @@ interface NetworkMapCache {
      * Implementations might understand, for example, the correct regulator to use for specific contracts/parties,
      * or the appropriate oracle for a contract.
      */
-    fun getRecommended(type: ServiceType, contract: Contract, vararg party: Party.Full): NodeInfo? = getNodesWithService(type).firstOrNull()
+    fun getRecommended(type: ServiceType, contract: Contract, vararg party: Party): NodeInfo? = getNodesWithService(type).firstOrNull()
 
     /** Look up the node info for a legal name. */
     fun getNodeByLegalName(name: String): NodeInfo? = partyNodes.singleOrNull { it.legalIdentity.name == name }
@@ -72,12 +72,7 @@ interface NetworkMapCache {
      */
 
     /** Look up the node info for a specific peer key. */
-    fun getNodeByLegalIdentityKey(compositeKey: CompositeKey): NodeInfo? {
-        // Although we should never have more than one match, it is theoretically possible. Report an error if it happens.
-        val candidates = partyNodes.filter { it.legalIdentity.owningKey == compositeKey }
-        check(candidates.size <= 1) { "Found more than one match for key $compositeKey" }
-        return candidates.singleOrNull()
-    }
+    fun getNodeByLegalIdentityKey(compositeKey: CompositeKey): NodeInfo?
     /** Look up all nodes advertising the service owned by [compositeKey] */
     fun getNodesByAdvertisedServiceIdentityKey(compositeKey: CompositeKey): List<NodeInfo> {
         return partyNodes.filter { it.advertisedServices.any { it.identity.owningKey == compositeKey } }
@@ -87,7 +82,7 @@ interface NetworkMapCache {
     fun getPartyInfo(party: Party): PartyInfo?
 
     /** Gets a notary identity by the given name. */
-    fun getNotary(name: String): Party.Full? {
+    fun getNotary(name: String): Party? {
         val notaryNode = notaryNodes.randomOrNull {
             it.advertisedServices.any { it.info.type.isSubTypeOf(ServiceType.notary) && it.info.name == name }
         }
@@ -98,7 +93,7 @@ interface NetworkMapCache {
      * Returns a notary identity advertised by any of the nodes on the network (chosen at random)
      * @param type Limits the result to notaries of the specified type (optional)
      */
-    fun getAnyNotary(type: ServiceType? = null): Party.Full? {
+    fun getAnyNotary(type: ServiceType? = null): Party? {
         val nodes = if (type == null) {
             notaryNodes
         } else {
@@ -111,7 +106,7 @@ interface NetworkMapCache {
     }
 
     /** Checks whether a given party is an advertised notary identity */
-    fun isNotary(party: Party.Full): Boolean = notaryNodes.any { it.notaryIdentity == party }
+    fun isNotary(party: Party): Boolean = notaryNodes.any { it.notaryIdentity == party }
 
     /**
      * Add a network map service; fetches a copy of the latest map from the service and subscribes to any further

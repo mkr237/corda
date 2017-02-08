@@ -10,6 +10,7 @@ import com.typesafe.config.Config
 import com.typesafe.config.ConfigRenderOptions
 import net.corda.core.*
 import net.corda.core.crypto.Party
+import net.corda.core.messaging.CordaRPCOps
 import net.corda.core.node.NodeInfo
 import net.corda.core.node.services.ServiceInfo
 import net.corda.core.node.services.ServiceType
@@ -31,11 +32,9 @@ import java.io.File
 import java.net.*
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset.UTC
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.TimeUnit.MILLISECONDS
@@ -59,7 +58,7 @@ interface DriverDSLExposedInterface {
     /**
      * Starts a [Node] in a separate process.
      *
-     * @param providedName Optional name of the node, which will be its legal name in [Party.Full]. Defaults to something
+     * @param providedName Optional name of the node, which will be its legal name in [Party]. Defaults to something
      *   random. Note that this must be unique as the driver uses it as a primary key!
      * @param advertisedServices The set of services to be advertised by the node. Defaults to empty set.
      * @param rpcUsers List of users who are authorised to use the RPC system. Defaults to empty list.
@@ -77,13 +76,13 @@ interface DriverDSLExposedInterface {
      * @param clusterSize Number of nodes to create for the cluster.
      * @param type The advertised notary service type. Currently the only supported type is [RaftValidatingNotaryService.type].
      * @param rpcUsers List of users who are authorised to use the RPC system. Defaults to empty list.
-     * @return The [Party.Full] identity of the distributed notary service, and the [NodeInfo]s of the notaries in the cluster.
+     * @return The [Party] identity of the distributed notary service, and the [NodeInfo]s of the notaries in the cluster.
      */
     fun startNotaryCluster(
             notaryName: String,
             clusterSize: Int = 3,
             type: ServiceType = RaftValidatingNotaryService.type,
-            rpcUsers: List<User> = emptyList()): Future<Pair<Party.Full, List<NodeHandle>>>
+            rpcUsers: List<User> = emptyList()): Future<Pair<Party, List<NodeHandle>>>
 
     /**
      * Starts a web server for a node
@@ -102,6 +101,7 @@ interface DriverDSLInternalInterface : DriverDSLExposedInterface {
 
 data class NodeHandle(
         val nodeInfo: NodeInfo,
+        val rpc: CordaRPCOps,
         val configuration: FullNodeConfiguration,
         val process: Process
 ) {
@@ -327,14 +327,16 @@ open class DriverDSL(
         executorService.shutdown()
     }
 
-    private fun queryNodeInfo(nodeAddress: HostAndPort, sslConfig: SSLConfiguration): NodeInfo? {
-        while (true) try {
-            val client = CordaRPCClient(nodeAddress, sslConfig)
-            client.start(ArtemisMessagingComponent.NODE_USER, ArtemisMessagingComponent.NODE_USER)
-            val rpcOps = client.proxy(timeout = Duration.of(15, ChronoUnit.SECONDS))
-            return rpcOps.nodeIdentity()
-        } catch(e: Exception) {
-            log.error("Retrying query node info at $nodeAddress")
+    private fun establishRpc(nodeAddress: HostAndPort, sslConfig: SSLConfiguration): ListenableFuture<CordaRPCOps> {
+        val client = CordaRPCClient(nodeAddress, sslConfig)
+        return poll(executorService, "for RPC connection") {
+            try {
+                client.start(ArtemisMessagingComponent.NODE_USER, ArtemisMessagingComponent.NODE_USER)
+                return@poll client.proxy()
+            } catch(e: Exception) {
+                log.error("Exception $e, Retrying RPC connection at $nodeAddress")
+                null
+            }
         }
     }
 
@@ -374,10 +376,14 @@ open class DriverDSL(
                 )
         )
 
-        val startNode = startNode(executorService, configuration, quasarJarPath, debugPort)
-        registerProcess(startNode)
-        return startNode.map {
-            NodeHandle(queryNodeInfo(messagingAddress, configuration)!!, configuration, it)
+        val processFuture = startNode(executorService, configuration, quasarJarPath, debugPort)
+        registerProcess(processFuture)
+        return processFuture.flatMap { process ->
+            establishRpc(messagingAddress, configuration).flatMap { rpc ->
+                rpc.waitUntilRegisteredWithNetworkMap().map {
+                    NodeHandle(rpc.nodeIdentity(), rpc, configuration, process)
+                }
+            }
         }
     }
 
@@ -386,7 +392,7 @@ open class DriverDSL(
             clusterSize: Int,
             type: ServiceType,
             rpcUsers: List<User>
-    ): ListenableFuture<Pair<Party.Full, List<NodeHandle>>> {
+    ): ListenableFuture<Pair<Party, List<NodeHandle>>> {
         val nodeNames = (1..clusterSize).map { "Notary Node $it" }
         val paths = nodeNames.map { driverDirectory / it }
         ServiceIdentityGenerator.generateToDisk(paths, type.id, notaryName)
@@ -446,13 +452,16 @@ open class DriverDSL(
 
     private fun startNetworkMapService(): ListenableFuture<Process> {
         val debugPort = if (isDebug) debugPortAllocation.nextPort() else null
-
+        val apiAddress = portAllocation.nextHostAndPort().toString()
         val baseDirectory = driverDirectory / networkMapLegalName
         val config = ConfigHelper.loadConfig(
                 baseDirectory = baseDirectory,
                 allowMissingConfig = true,
                 configOverrides = mapOf(
                         "myLegalName" to networkMapLegalName,
+                        // TODO: remove the webAddress as NMS doesn't need to run a web server. This will cause all
+                        //       node port numbers to be shifted, so all demos and docs need to be updated accordingly.
+                        "webAddress" to apiAddress,
                         "artemisAddress" to networkMapAddress.toString(),
                         "extraAdvertisedServiceIds" to "",
                         "useTestClock" to useTestClock

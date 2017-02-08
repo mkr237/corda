@@ -191,7 +191,7 @@ class CashTests {
             // Move fails: not allowed to summon money.
             tweak {
                 command(DUMMY_PUBKEY_1) { Cash.Commands.Move() }
-                this `fails with` "at issuer MegaCorp the amounts balance"
+                this `fails with` "the amounts balance"
             }
 
             // Issue works.
@@ -305,14 +305,14 @@ class CashTests {
         transaction {
             input { inState }
             output { outState `issued by` MINI_CORP }
-            this `fails with` "at issuer MegaCorp the amounts balance"
+            this `fails with` "the amounts balance"
         }
         // Can't change deposit reference when splitting.
         transaction {
             input { inState }
             output { outState.copy(amount = inState.amount / 2).editDepositRef(0) }
             output { outState.copy(amount = inState.amount / 2).editDepositRef(1) }
-            this `fails with` "for reference [01] at issuer MegaCorp the amounts balance"
+            this `fails with` "the amounts balance"
         }
         // Can't mix currencies.
         transaction {
@@ -338,7 +338,7 @@ class CashTests {
             input { inState `issued by` MINI_CORP }
             output { outState }
             command(DUMMY_PUBKEY_1) { Cash.Commands.Move() }
-            this `fails with` "at issuer MiniCorp the amounts balance"
+            this `fails with` "the amounts balance"
         }
         // Can't combine two different deposits at the same issuer.
         transaction {
@@ -386,10 +386,10 @@ class CashTests {
 
             command(MEGA_CORP_PUBKEY, MINI_CORP_PUBKEY) { Cash.Commands.Move() }
 
-            this `fails with` "at issuer MegaCorp the amounts balance"
+            this `fails with` "the amounts balance"
 
             command(MEGA_CORP_PUBKEY) { Cash.Commands.Exit(200.DOLLARS `issued by` defaultIssuer) }
-            this `fails with` "at issuer MiniCorp the amounts balance"
+            this `fails with` "the amounts balance"
 
             command(MINI_CORP_PUBKEY) { Cash.Commands.Exit(200.DOLLARS `issued by` MINI_CORP.ref(defaultRef)) }
             this.verifies()
@@ -404,7 +404,7 @@ class CashTests {
             output { outState.copy(amount = inState.amount - (200.DOLLARS `issued by` defaultIssuer)) }
             command(MEGA_CORP_PUBKEY) { Cash.Commands.Exit(200.DOLLARS `issued by` defaultIssuer) }
             command(DUMMY_PUBKEY_1) { Cash.Commands.Move() }
-            this `fails with` "at issuer MegaCorp the amounts balance"
+            this `fails with` "the amounts balance"
         }
     }
 
@@ -418,13 +418,13 @@ class CashTests {
             // Can't merge them together.
             tweak {
                 output { inState.copy(owner = DUMMY_PUBKEY_2, amount = 2000.DOLLARS `issued by` defaultIssuer) }
-                this `fails with` "at issuer MegaCorp the amounts balance"
+                this `fails with` "the amounts balance"
             }
             // Missing MiniCorp deposit
             tweak {
                 output { inState.copy(owner = DUMMY_PUBKEY_2) }
                 output { inState.copy(owner = DUMMY_PUBKEY_2) }
-                this `fails with` "at issuer MegaCorp the amounts balance"
+                this `fails with` "the amounts balance"
             }
 
             // This works.
@@ -459,7 +459,7 @@ class CashTests {
 
     val THEIR_PUBKEY_1 = DUMMY_PUBKEY_2
 
-    fun makeCash(amount: Amount<Currency>, corp: Party.Full, depositRef: Byte = 1) =
+    fun makeCash(amount: Amount<Currency>, corp: Party, depositRef: Byte = 1) =
             StateAndRef(
                     Cash.State(amount `issued by` corp.ref(depositRef), OUR_PUBKEY_1) `with notary` DUMMY_NOTARY,
                     StateRef(SecureHash.randomSHA256(), Random().nextInt(32))
@@ -475,7 +475,7 @@ class CashTests {
     /**
      * Generate an exit transaction, removing some amount of cash from the ledger.
      */
-    fun makeExit(amount: Amount<Currency>, corp: Party.Full, depositRef: Byte = 1): WireTransaction {
+    fun makeExit(amount: Amount<Currency>, corp: Party, depositRef: Byte = 1): WireTransaction {
         val tx = TransactionType.General.Builder(DUMMY_NOTARY)
         Cash().generateExit(tx, Amount(amount.quantity, Issued(corp.ref(depositRef), amount.token)), WALLET)
         return tx.toWireTransaction()

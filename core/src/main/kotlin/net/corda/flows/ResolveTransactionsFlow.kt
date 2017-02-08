@@ -29,18 +29,21 @@ import java.util.*
  * The flow returns a list of verified [LedgerTransaction] objects, in a depth-first order.
  */
 class ResolveTransactionsFlow(private val txHashes: Set<SecureHash>,
-                              private val otherSide: Party.Full) : FlowLogic<List<LedgerTransaction>>() {
+                              private val otherSide: Party) : FlowLogic<List<LedgerTransaction>>() {
 
     companion object {
         private fun dependencyIDs(wtx: WireTransaction) = wtx.inputs.map { it.txhash }.toSet()
 
-        private fun topologicalSort(transactions: Collection<SignedTransaction>): List<SignedTransaction> {
+        /**
+         * Topologically sorts the given transactions such that dependencies are listed before dependers. */
+        @JvmStatic
+        fun topologicalSort(transactions: Collection<SignedTransaction>): List<SignedTransaction> {
             // Construct txhash -> dependent-txs map
             val forwardGraph = HashMap<SecureHash, HashSet<SignedTransaction>>()
-            transactions.forEach { tx ->
-                tx.tx.inputs.forEach { input ->
+            transactions.forEach { stx ->
+                stx.tx.inputs.forEach { input ->
                     // Note that we use a LinkedHashSet here to make the traversal deterministic (as long as the input list is)
-                    forwardGraph.getOrPut(input.txhash) { LinkedHashSet() }.add(tx)
+                    forwardGraph.getOrPut(input.txhash) { LinkedHashSet() }.add(stx)
                 }
             }
 
@@ -77,14 +80,14 @@ class ResolveTransactionsFlow(private val txHashes: Set<SecureHash>,
     /**
      * Resolve the full history of a transaction and verify it with its dependencies.
      */
-    constructor(stx: SignedTransaction, otherSide: Party.Full) : this(stx.tx, otherSide) {
+    constructor(stx: SignedTransaction, otherSide: Party) : this(stx.tx, otherSide) {
         this.stx = stx
     }
 
     /**
      * Resolve the full history of a transaction and verify it with its dependencies.
      */
-    constructor(wtx: WireTransaction, otherSide: Party.Full) : this(dependencyIDs(wtx), otherSide) {
+    constructor(wtx: WireTransaction, otherSide: Party) : this(dependencyIDs(wtx), otherSide) {
         this.wtx = wtx
     }
 

@@ -7,6 +7,7 @@ import net.corda.core.crypto.SecureHash
 import net.corda.core.flows.FlowException
 import net.corda.core.flows.FlowLogic
 import net.corda.core.utilities.UntrustworthyData
+import net.corda.core.utilities.unwrap
 import net.corda.flows.FetchDataFlow.DownloadedVsRequestedDataMismatch
 import net.corda.flows.FetchDataFlow.HashNotFound
 import java.util.*
@@ -29,7 +30,7 @@ import java.util.*
  */
 abstract class FetchDataFlow<T : NamedByHash, in W : Any>(
         protected val requests: Set<SecureHash>,
-        protected val otherSide: Party.Full) : FlowLogic<FetchDataFlow.Result<T>>() {
+        protected val otherSide: Party) : FlowLogic<FetchDataFlow.Result<T>>() {
 
     class DownloadedVsRequestedDataMismatch(val requested: SecureHash, val got: SecureHash) : IllegalArgumentException()
     class DownloadedVsRequestedSizeMismatch(val requested: Int, val got: Int) : IllegalArgumentException()

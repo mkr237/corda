@@ -16,10 +16,10 @@ import net.corda.flows.TwoPartyTradeFlow
 import java.time.Instant
 import java.util.*
 
-class SellerFlow(val otherParty: Party.Full,
+class SellerFlow(val otherParty: Party,
                  val amount: Amount<Currency>,
                  override val progressTracker: ProgressTracker) : FlowLogic<SignedTransaction>() {
-    constructor(otherParty: Party.Full, amount: Amount<Currency>) : this(otherParty, amount, tracker())
+    constructor(otherParty: Party, amount: Amount<Currency>) : this(otherParty, amount, tracker())
 
     companion object {
         val PROSPECTUS_HASH = SecureHash.parse("decd098666b9657314870e192ced0c3519c2c9d395507a238338f8d003929de9")
@@ -55,17 +55,14 @@ class SellerFlow(val otherParty: Party.Full,
                 amount,
                 cpOwnerKey,
                 progressTracker.getChildProgressTracker(TRADING)!!)
-        val tradeTX: SignedTransaction = subFlow(seller, shareParentSessions = true)
-        serviceHub.recordTransactions(listOf(tradeTX))
-
-        return tradeTX
+        return subFlow(seller, shareParentSessions = true)
     }
 
     @Suspendable
     fun selfIssueSomeCommercialPaper(ownedBy: CompositeKey, notaryNode: NodeInfo): StateAndRef<CommercialPaper.State> {
         // Make a fake company that's issued its own paper.
         val keyPair = generateKeyPair()
-        val party = Party.Full("Bank of London", keyPair.public)
+        val party = Party("Bank of London", keyPair.public)
 
         val issuance: SignedTransaction = run {
             val tx = CommercialPaper().generateIssue(party.ref(1, 2, 3), 1100.DOLLARS `issued by` DUMMY_CASH_ISSUER,
