@@ -44,11 +44,11 @@ sealed class MerkleTree(val hash: SecureHash) {
          * @param lastNodesList MerkleTree nodes from previous level.
          * @return Tree root.
          */
-        private tailrec fun buildMerkleTree(lastNodesList: List<MerkleTree>): MerkleTree {
+        private tailrec fun buildMerkleTree(lastNodesList: List<MerkleTree>): MerkleTree =
             if (lastNodesList.isEmpty())
                 throw MerkleTreeException("Cannot calculate Merkle root on empty hash list.")
-            if (lastNodesList.size == 1) {
-                return lastNodesList[0] //Root reached.
+            else if (lastNodesList.size == 1) {
+                lastNodesList[0] // Root reached.
             } else {
                 val newLevelHashes: MutableList<MerkleTree> = ArrayList()
                 var i = 0
@@ -62,8 +62,7 @@ sealed class MerkleTree(val hash: SecureHash) {
                     newLevelHashes.add(combined)
                     i += 2
                 }
-                return buildMerkleTree(newLevelHashes)
+                buildMerkleTree(newLevelHashes)
             }
-        }
     }
 }
